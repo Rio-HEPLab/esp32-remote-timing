@@ -1,27 +1,35 @@
+
 #include <WiFi.h>
-#include <ESPmDNS.h>
+#include <WiFiClient.h>
+#include <WiFiAP.h>
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
+#include <ESPmDNS.h>
 
 #include "secrets.h"
 
-const unsigned int PACKET_SIZE = 8;
+const unsigned int PACKET_SIZE = 16;
 //unsigned char ReceivedPackage[256];
 unsigned char ReceivedPackage[PACKET_SIZE];
+unsigned char buffervar[4];
 
 //The udp library class
 WiFiUDP udp;
+unsigned int localPort = 3333;      // local port to listen for UDP packets
+
+//WiFiServer server(80);
 
 void setup() {
   Serial.begin(115200);
   Serial.println("Booting");
-  WiFi.mode(WIFI_STA);
+  
+  /*WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while (WiFi.waitForConnectResult() != WL_CONNECTED) {
     Serial.println("Connection Failed! Rebooting...");
     delay(5000);
     ESP.restart();
-  }
+  }*/
 
   // Port defaults to 3232
   // ArduinoOTA.setPort(3232);
@@ -35,8 +43,23 @@ void setup() {
   // Password can be set with it's md5 value as well
   // MD5(admin) = 21232f297a57a5a743894a0e4a801fc3
   // ArduinoOTA.setPasswordHash("21232f297a57a5a743894a0e4a801fc3");
+  
   pinMode(LED_BUILTIN, OUTPUT);
-  udp.begin(3333);
+
+  Serial.println("Configuring access point...");
+
+  // You can remove the password parameter if you want the AP to be open.
+  WiFi.softAP(ssid, pass);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(myIP);
+  //server.begin();
+  //Serial.println("Server started");
+
+  String str = "Setting UDP port to "; str += localPort;
+  Serial.println( str );
+  udp.begin( localPort );
+
   ArduinoOTA
     .onStart([]() {
       String type;
@@ -66,17 +89,20 @@ void setup() {
 
   ArduinoOTA.begin();
 
-  Serial.println("Ready");
+  /*Serial.println("Ready");
   Serial.print("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println(WiFi.localIP());*/
 }
 
 void loop() 
 {
+  
   ArduinoOTA.handle();
+
+  //WiFiClient client = server.available();   // listen for incoming clients
+  
   if(udp.parsePacket())
   {
-    char buffervar[4];
     //udp.read(ReceivedPackage,256);
     udp.read(ReceivedPackage,PACKET_SIZE);    
     if (ReceivedPackage[0]=='C' && ReceivedPackage[1]=='A' && ReceivedPackage[2]=='L' && ReceivedPackage[3]=='I' && ReceivedPackage[4]=='B')
@@ -112,10 +138,19 @@ void loop()
     }
     else
     {
-      memcpy(buffervar,ReceivedPackage,4);
-      int state = ReceivedPackage[4];
-      unsigned long timestamp = buffervar[0] | (buffervar[1] << 8) | (buffervar[2] << 16) | (buffervar[3] << 24);
-      Serial.printf("TimeStamp: %d - State Found: %d\n",timestamp,state);
+      size_t pos = 0;
+      memcpy(buffervar,&ReceivedPackage[pos],sizeof(unsigned long));
+      pos += sizeof(unsigned long);
+      //unsigned long timestamp = buffervar[0] | (buffervar[1] << 8) | (buffervar[2] << 16) | (buffervar[3] << 24);
+      unsigned long* timestamp_ptr = (unsigned long*)buffervar;
+      unsigned long timestamp = *timestamp_ptr;
+      memcpy(buffervar,&ReceivedPackage[pos],sizeof(unsigned long));
+      pos += sizeof(unsigned long);
+      unsigned long* counter_ptr = (unsigned long*)buffervar;
+      unsigned long counter = *counter_ptr;
+      int state = ReceivedPackage[pos];
+      
+      Serial.printf("TimeStamp: %d Counter: %d State Found: %d\n",timestamp,counter,state);
       digitalWrite(LED_BUILTIN,state);
     }
   }

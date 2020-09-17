@@ -11,6 +11,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <time.h>
+#include <math.h>
 
 #include "secrets.h"
 
@@ -37,16 +38,21 @@ const int   daylightOffset_sec = 3600 * daylightOffset;
 
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP udp;
-IPAddress ip_broadcast(192, 168, 1, 255);
+//IPAddress ip_broadcast(192, 168, 1, 255);
+IPAddress ip_broadcast(192, 168, 4, 255);
 unsigned int localPort = 2390;      // local port to listen for UDP packets
 unsigned int remotePort = 3333;
 unsigned int udpPort = localPort;
-const unsigned int PACKET_SIZE = 8;
+const unsigned int PACKET_SIZE = 16;
 //unsigned char packetBuffer[256]; // data buffer
 unsigned char packetBuffer[PACKET_SIZE];
 IPAddress masterAddress;
-unsigned long delay_val = 0;
+float delay_val = 0;
+float delay_val2 = 0;
+float std_dev_delay = 0;
 unsigned long remote_counter = 0;
+unsigned long local_counter_ref = 0;
+boolean set_counter_ref = false;
 
 // the setup routine runs once when you press reset:
 void setup() {
@@ -100,77 +106,112 @@ void setup() {
 void loop() {
 
   if ( !calib && connected ) {
-    int numberOfTries = 0, maxTries = 10;
-    unsigned long counter = 0, max_counter = 100E6;
-    boolean pass = false; 
-    while ( !calib && numberOfTries < maxTries ) {
+    set_counter_ref = false;
+    local_counter_ref = 0;
+    remote_counter = 0;
+    delay_val = 0;
+    delay_val2 = 0;
+    std_dev_delay = 0;
+    unsigned int numberOfRounds = 10;
+    for (unsigned int round = 0; round < numberOfRounds; ++round) {
+      unsigned int numberOfTries = 0, maxTries = 5;
+      unsigned long counter = 0, max_counter = 10E6;
+      boolean pass = false; 
+      boolean calib_round = false;
+      while ( !calib_round && numberOfTries < maxTries ) {
 
-      String str = "\nCALIB attempt "; str += numberOfTries;
-      Serial.println( str );
+        String str = "\nCALIB attempt "; str += numberOfTries;
+        Serial.println( str );
       
-      // Send CALIB command
-      udp.beginPacket( ip_broadcast, remotePort );
-      udp.printf( "CALIB" );
-      udp.endPacket();
-      Serial.println("Sent CALIB packet.");
-
-      Serial.println("Waiting return from CALIB command.");
-      pass = false; counter = 0;
-      while ( counter < max_counter ) {
-        if ( udp.parsePacket() ) { pass = true; break; }
-        ++counter;
-      }
-      if ( pass ) {
-        // Remote time
-        //udp.read( packetBuffer, 256);
-        udp.read( packetBuffer, PACKET_SIZE );
-        // Send reply
-        masterAddress = udp.remoteIP();
-        udp.beginPacket( masterAddress, remotePort );
-        udp.printf( "ACK" );
+        // Send CALIB command
+        udp.beginPacket( ip_broadcast, remotePort );
+        udp.printf( "CALIB" );
         udp.endPacket();
-        Serial.println("ACK sent.");
-        // Parse remote time
-        unsigned char buff4[4];
-        memcpy(buff4, packetBuffer, 4);
-        unsigned long* remote_counter_ptr = (unsigned long*)buff4;
-        remote_counter = *remote_counter_ptr;
-        String str = "Remote time = "; str += remote_counter;
-        Serial.println( str );
-      } else {
-        ++numberOfTries;
-        continue;
-      }
+        Serial.println("Sent CALIB packet.");
 
-      Serial.println("Waiting return with delay value.");
-      pass = false; counter = 0;
-      while ( counter < max_counter ) {
-        if ( udp.parsePacket() ) { pass = true; break; }
-        ++counter;
-      }
-      if ( pass ) {
-        Serial.println("Packet received.");
-        //udp.read( packetBuffer, 256 );
-        udp.read( packetBuffer, PACKET_SIZE );
-        unsigned char buff4[4];
-        memcpy(buff4, packetBuffer, 4);
-        unsigned long* delay_val_ptr = (unsigned long*)buff4;
-        delay_val = *delay_val_ptr;
-        String str = "Delay = "; str += delay_val;
-        Serial.println( str );
+        Serial.println("Waiting return from CALIB command.");
+        pass = false; counter = 0;
+        while ( counter < max_counter ) {
+          if ( udp.parsePacket() ) { pass = true; break; }
+          ++counter;
+        }
+        if ( pass ) {
+          // Remote time
+          //udp.read( packetBuffer, 256);
+          udp.read( packetBuffer, PACKET_SIZE );
+          // Send reply
+          masterAddress = udp.remoteIP();
+          udp.beginPacket( masterAddress, remotePort );
+          udp.printf( "ACK" );
+          udp.endPacket();
+          Serial.println("ACK sent.");
+          // Parse remote time and set local counter only in the first CALIB cycle
+          if ( !set_counter_ref ) {
+            local_counter_ref = millis();
+            String str = "Local time = "; str += local_counter_ref;
+            Serial.println( str );
+            
+            unsigned char buff4[4];
+            memcpy(buff4, packetBuffer, 4);
+            unsigned long* remote_counter_ptr = (unsigned long*)buff4;
+            remote_counter = *remote_counter_ptr;
+            str = "Remote time = "; str += remote_counter;
+            Serial.println( str );
+            
+            set_counter_ref = true;
+          }
+        } else {
+          ++numberOfTries;
+          continue;
+        }
 
-        calib = true;
-        Serial.println("CALIB succeeded.");  
-      } else {
-        ++numberOfTries;
-        continue;
-      }
+        Serial.println("Waiting return with delay value.");
+        pass = false; counter = 0;
+        while ( counter < max_counter ) {
+          if ( udp.parsePacket() ) { pass = true; break; }
+          ++counter;
+        }
+        if ( pass ) {
+          Serial.println("Packet received.");
+          //udp.read( packetBuffer, 256 );
+          udp.read( packetBuffer, PACKET_SIZE );
+          unsigned char buff4[4];
+          memcpy(buff4, packetBuffer, 4);
+          unsigned long* delay_val_ptr = (unsigned long*)buff4;
+          unsigned long delay_val_tmp = *delay_val_ptr;
+          // Sum delays for average
+          delay_val += delay_val_tmp;
+          delay_val2 += ( delay_val_tmp * delay_val_tmp );
+          String str = "Delay = "; str += delay_val_tmp;
+          Serial.println( str );
+
+          calib_round = true;
+          if ( !calib ) calib = true;      
+        } else {
+          ++numberOfTries;
+          continue;
+        }
+      }      
     }
-    if ( !calib ) {
+    if ( calib ) {
+      delay_val /= numberOfRounds;
+      delay_val2 /= numberOfRounds;
+      std_dev_delay = ( ( (float)numberOfRounds )/( numberOfRounds - 1 ) ) * sqrt( delay_val2 - delay_val*delay_val );
+      String str = "Average delay = "; str += delay_val;
+      Serial.println( str );
+      str = "Std. deviation = "; str += std_dev_delay;
+      Serial.println( str ); 
+      Serial.println("CALIB succeeded.");
+    }
+    else {
+      set_counter_ref = false;
+      local_counter_ref = 0;
+      remote_counter = 0;
       delay_val = 0;
+      delay_val2 = 0;
       calib = true;
       Serial.println("CALIB failed.");
-    }  
+    }
   }
   
   // read the input pin:
@@ -180,6 +221,11 @@ void loop() {
   int nextState = read_sensor;
 
   if ( nextState != currentState ) {
+
+    time_t epoch_now;
+    time( &epoch_now );
+
+    unsigned long counter_now = millis();
     
     digitalWrite(LED_BUILTIN, nextState);
     
@@ -189,18 +235,18 @@ void loop() {
 
     // send a reply, to the IP address and port that sent us the packet we received
     udp.beginPacket(ip_broadcast, remotePort);
-    //unsigned long rtc_epoch_now = rtc.getEpoch();
-    time_t epoch_now;
-    time( &epoch_now );
-    //memset(packetBuffer, 0, 256);
-    memset(packetBuffer, 0, PACKET_SIZE);
-    //memcpy(&packetBuffer[0], &rtc_epoch_now, sizeof(unsigned long));
-    memcpy(&packetBuffer[0], &epoch_now, sizeof(unsigned long));
-    size_t pos = sizeof(unsigned long);
-    packetBuffer[pos] = nextState;
 
-    //str = "Pos 0: "; str += rtc_epoch_now; str += "\n";
-    str = "Pos 0: "; str += epoch_now; str += "\n";
+    counter_now = ( counter_now - local_counter_ref + remote_counter + delay_val );
+    
+    memset(packetBuffer, 0, PACKET_SIZE);
+    size_t pos = 0;
+    memcpy(&packetBuffer[pos], &epoch_now, sizeof(unsigned long));
+    str = "Pos "; str += pos; str += ": "; str += epoch_now; str += "\n";
+    pos += sizeof(unsigned long);
+    memcpy(&packetBuffer[pos], &counter_now, sizeof(unsigned long));
+    str = "Pos "; str += pos; str += ": "; str += counter_now; str += "\n";
+    pos += sizeof(unsigned long);
+    packetBuffer[pos] = nextState;
     str += "Pos "; str += pos; str += ": "; str += packetBuffer[pos];
     Serial.println(str);
      
