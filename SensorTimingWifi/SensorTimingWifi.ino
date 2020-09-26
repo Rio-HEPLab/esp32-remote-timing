@@ -10,10 +10,13 @@
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 #include <time.h>
 #include <math.h>
 
 #include "secrets.h"
+
+const int SIZEUL = sizeof(unsigned long);
 
 //int wifi_status = WL_IDLE_STATUS;
 boolean connected = false;
@@ -38,6 +41,7 @@ const int   daylightOffset_sec = 3600 * daylightOffset;
 
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP udp;
+byte macAdd[6];
 //IPAddress ip_broadcast(192, 168, 1, 255);
 IPAddress ip_broadcast(192, 168, 4, 255);
 unsigned int localPort = 2390;      // local port to listen for UDP packets
@@ -56,13 +60,15 @@ boolean set_counter_ref = false;
 
 // the setup routine runs once when you press reset:
 void setup() {
+
+  //---------------------
   // initialize serial communication at 9600 bits per second:
   Serial.begin(115200);
   Serial.println("Booting");
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
   }
-    
+
   // make the pushbutton's pin an input:
   //pinMode(pushButton, INPUT);
   pinMode(sensor, INPUT);
@@ -75,6 +81,48 @@ void setup() {
     
   Serial.println("CONNECTED");
 
+  WiFi.macAddress( macAdd );
+  Serial.print( "MAC: " );
+  Serial.print( macAdd[5], HEX ); Serial.print( ":" );
+  Serial.print( macAdd[4], HEX ); Serial.print( ":" );
+  Serial.print( macAdd[3], HEX ); Serial.print( ":" );
+  Serial.print( macAdd[2], HEX ); Serial.print( ":" );
+  Serial.print( macAdd[1], HEX ); Serial.print( ":" );
+  Serial.println( macAdd[0], HEX );
+      
+  // OTA
+  ArduinoOTA
+    .onStart([]() {
+      String type;
+      if (ArduinoOTA.getCommand() == U_FLASH)
+        type = "sketch";
+      else // U_SPIFFS
+        type = "filesystem";
+
+      // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+      Serial.println("Start updating " + type);
+    })
+    .onEnd([]() {
+      Serial.println("\nEnd");
+      ESP.restart();
+    })
+    .onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    })
+    .onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+      if (error == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR) Serial.println("End Failed");
+    });
+
+  ArduinoOTA.begin();
+  // End OTA
+
+  //---------------------
+  
   String str = "Setting UDP port to "; str += localPort;
   Serial.println( str );
   udp.begin(localPort);
@@ -105,6 +153,14 @@ void setup() {
 // the loop routine runs over and over again forever:
 void loop() {
 
+  ArduinoOTA.handle();
+  
+  if ( !connected ) {
+    connectToWiFi(ssid, pass);
+    while ( !connected ) { delay(100); Serial.print("."); };
+    calib = false;
+  }
+  
   if ( !calib && connected ) {
     set_counter_ref = false;
     local_counter_ref = 0;
@@ -151,8 +207,8 @@ void loop() {
             String str = "Local time = "; str += local_counter_ref;
             Serial.println( str );
             
-            unsigned char buff4[4];
-            memcpy(buff4, packetBuffer, 4);
+            unsigned char buff4[SIZEUL];
+            memcpy(buff4, packetBuffer, SIZEUL);
             unsigned long* remote_counter_ptr = (unsigned long*)buff4;
             remote_counter = *remote_counter_ptr;
             str = "Remote time = "; str += remote_counter;
@@ -175,8 +231,8 @@ void loop() {
           Serial.println("Packet received.");
           //udp.read( packetBuffer, 256 );
           udp.read( packetBuffer, PACKET_SIZE );
-          unsigned char buff4[4];
-          memcpy(buff4, packetBuffer, 4);
+          unsigned char buff4[SIZEUL];
+          memcpy(buff4, packetBuffer, SIZEUL);
           unsigned long* delay_val_ptr = (unsigned long*)buff4;
           unsigned long delay_val_tmp = *delay_val_ptr;
           // Sum delays for average
@@ -191,6 +247,8 @@ void loop() {
           ++numberOfTries;
           continue;
         }
+
+        delay(100);
       }      
     }
     if ( calib ) {
@@ -240,10 +298,10 @@ void loop() {
     
     memset(packetBuffer, 0, PACKET_SIZE);
     size_t pos = 0;
-    memcpy(&packetBuffer[pos], &epoch_now, sizeof(unsigned long));
+    memcpy(&packetBuffer[pos], &epoch_now, SIZEUL);
     str = "Pos "; str += pos; str += ": "; str += epoch_now; str += "\n";
     pos += sizeof(unsigned long);
-    memcpy(&packetBuffer[pos], &counter_now, sizeof(unsigned long));
+    memcpy(&packetBuffer[pos], &counter_now, SIZEUL);
     str = "Pos "; str += pos; str += ": "; str += counter_now; str += "\n";
     pos += sizeof(unsigned long);
     packetBuffer[pos] = nextState;

@@ -5,8 +5,16 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <ESPmDNS.h>
+#include <LiquidCrystal.h>
+#include <time.h>
 
 #include "secrets.h"
+
+// initialize the library by associating any needed LCD interface pin
+// with the arduino pin number it is connected to
+//const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+//LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+LiquidCrystal lcd(22, 23, 5, 18, 19, 21);
 
 const unsigned int PACKET_SIZE = 16;
 //unsigned char ReceivedPackage[256];
@@ -18,6 +26,8 @@ WiFiUDP udp;
 unsigned int localPort = 3333;      // local port to listen for UDP packets
 
 //WiFiServer server(80);
+
+unsigned long event_count = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -92,6 +102,11 @@ void setup() {
   /*Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());*/
+
+  // set up the LCD's number of columns and rows:
+  lcd.begin(16, 2);
+  // Print a message to the LCD.
+  lcd.print("READY");
 }
 
 void loop() 
@@ -110,17 +125,26 @@ void loop()
       Serial.println("Entering on Calibration Mode!");
       IPAddress remote = udp.remoteIP();
       uint16_t port = udp.remotePort();
-      
+
+      unsigned long refTime = millis();
+      memset(ReceivedPackage, 0, PACKET_SIZE);
+      memcpy(&ReceivedPackage[0], &refTime, sizeof(unsigned long));
       udp.beginPacket(remote,port);
-      udp.printf("%lu", millis());
+      udp.write(ReceivedPackage, PACKET_SIZE);
       udp.endPacket();
+      /*udp.beginPacket(remote,port);
+      udp.printf("%lu", millis());
+      udp.endPacket();*/
+      Serial.print("Ref. time: "); Serial.println(refTime);
       
-      int startTime = millis();
+      unsigned long startTime = millis();
+      Serial.print("Start time: "); Serial.println(startTime);
+            
       Serial.print("Waiting Return Package from ");
       Serial.println(remote);
       while(!udp.parsePacket())
       {};
-      int stopTime = millis();
+      unsigned long stopTime = millis();
       //udp.read(ReceivedPackage,256);
       udp.read(ReceivedPackage,PACKET_SIZE);
       unsigned long delayVar = (stopTime - startTime)/2;
@@ -152,6 +176,16 @@ void loop()
       
       Serial.printf("TimeStamp: %d Counter: %d State Found: %d\n",timestamp,counter,state);
       digitalWrite(LED_BUILTIN,state);
+      /*digitalWrite(LED_BUILTIN,HIGH);
+      delay(100);
+      digitalWrite(LED_BUILTIN,LOW);*/
+
+      ++event_count;
+      lcd.setCursor(0,0);
+      lcd.print("Count=");lcd.print(event_count);
+      lcd.print(" St.="); lcd.print(state);
+      lcd.setCursor(0,1);
+      lcd.print("Time="); lcd.print(counter);
     }
   }
 }
