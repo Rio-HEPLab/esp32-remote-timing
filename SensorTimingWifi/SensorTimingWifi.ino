@@ -42,8 +42,10 @@ const int   daylightOffset_sec = 3600 * daylightOffset;
 // A UDP instance to let us send and receive packets over UDP
 WiFiUDP udp;
 byte macAdd[6];
+IPAddress ip_local;
 //IPAddress ip_broadcast(192, 168, 1, 255);
-IPAddress ip_broadcast(192, 168, 4, 255);
+//IPAddress ip_broadcast(192, 168, 4, 255);
+IPAddress ip_broadcast;
 unsigned int localPort = 2390;      // local port to listen for UDP packets
 unsigned int remotePort = 3333;
 unsigned int udpPort = localPort;
@@ -78,7 +80,6 @@ void setup() {
   connectToWiFi(ssid, pass);
 
   while ( !connected ) { delay(100); Serial.print("."); };
-    
   Serial.println("CONNECTED");
 
   WiFi.macAddress( macAdd );
@@ -158,6 +159,7 @@ void loop() {
   if ( !connected ) {
     connectToWiFi(ssid, pass);
     while ( !connected ) { delay(100); Serial.print("."); };
+    Serial.println("CONNECTED");
     calib = false;
   }
   
@@ -171,7 +173,7 @@ void loop() {
     unsigned int numberOfRounds = 10;
     for (unsigned int round = 0; round < numberOfRounds; ++round) {
       unsigned int numberOfTries = 0, maxTries = 5;
-      unsigned long counter = 0, max_counter = 10E6;
+      unsigned long counter = 0, max_counter = 2E6;
       boolean pass = false; 
       boolean calib_round = false;
       while ( !calib_round && numberOfTries < maxTries ) {
@@ -298,15 +300,14 @@ void loop() {
     
     memset(packetBuffer, 0, PACKET_SIZE);
     size_t pos = 0;
+    memcpy(&packetBuffer[pos], &macAdd, 6);
+    pos += 6;
     memcpy(&packetBuffer[pos], &epoch_now, SIZEUL);
-    str = "Pos "; str += pos; str += ": "; str += epoch_now; str += "\n";
-    pos += sizeof(unsigned long);
+    pos += SIZEUL;
     memcpy(&packetBuffer[pos], &counter_now, SIZEUL);
-    str = "Pos "; str += pos; str += ": "; str += counter_now; str += "\n";
-    pos += sizeof(unsigned long);
+    pos += SIZEUL;
     packetBuffer[pos] = nextState;
-    str += "Pos "; str += pos; str += ": "; str += packetBuffer[pos];
-    Serial.println(str);
+    pos += 1;
      
     //udp.write(packetBuffer, 256);
     udp.write(packetBuffer, PACKET_SIZE);
@@ -379,7 +380,11 @@ void WiFiEvent(WiFiEvent_t event){
           Serial.println(WiFi.localIP());  
           //initializes the UDP state
           //This initializes the transfer buffer
-          udp.begin(WiFi.localIP(),udpPort);
+          ip_local = WiFi.localIP();
+          //udp.begin(WiFi.localIP(),udpPort);
+          udp.begin(ip_local,udpPort);
+          ip_broadcast = ip_local; ip_broadcast[3] = 255;
+          Serial.print("Broadcast set to: "); Serial.println(ip_broadcast);
           connected = true;
           break;
       case SYSTEM_EVENT_STA_DISCONNECTED:

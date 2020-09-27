@@ -20,6 +20,7 @@ const unsigned int PACKET_SIZE = 16;
 //unsigned char ReceivedPackage[256];
 unsigned char ReceivedPackage[PACKET_SIZE];
 unsigned char buffervar[4];
+unsigned char macAdd[6];
 
 //The udp library class
 WiFiUDP udp;
@@ -122,7 +123,7 @@ void loop()
     udp.read(ReceivedPackage,PACKET_SIZE);    
     if (ReceivedPackage[0]=='C' && ReceivedPackage[1]=='A' && ReceivedPackage[2]=='L' && ReceivedPackage[3]=='I' && ReceivedPackage[4]=='B')
     {
-      Serial.println("Entering on Calibration Mode!");
+      Serial.println("Entering on Calibration Mode");
       IPAddress remote = udp.remoteIP();
       uint16_t port = udp.remotePort();
 
@@ -142,8 +143,11 @@ void loop()
             
       Serial.print("Waiting Return Package from ");
       Serial.println(remote);
-      while(!udp.parsePacket())
-      {};
+      //while (!udp.parsePacket()) {};
+      // Check that packet has remote client as sender
+      while (1) {
+        if ( udp.parsePacket() && udp.remoteIP() == remote ) break;
+      };
       unsigned long stopTime = millis();
       //udp.read(ReceivedPackage,256);
       udp.read(ReceivedPackage,PACKET_SIZE);
@@ -163,6 +167,8 @@ void loop()
     else
     {
       size_t pos = 0;
+      memcpy(macAdd,&ReceivedPackage[pos],6);
+      pos += 6;      
       memcpy(buffervar,&ReceivedPackage[pos],sizeof(unsigned long));
       pos += sizeof(unsigned long);
       //unsigned long timestamp = buffervar[0] | (buffervar[1] << 8) | (buffervar[2] << 16) | (buffervar[3] << 24);
@@ -173,8 +179,12 @@ void loop()
       unsigned long* counter_ptr = (unsigned long*)buffervar;
       unsigned long counter = *counter_ptr;
       int state = ReceivedPackage[pos];
-      
-      Serial.printf("TimeStamp: %d Counter: %d State Found: %d\n",timestamp,counter,state);
+
+      Serial.println( "DATA BEGIN" );
+      Serial.printf ( "MAC: %x:%x:%x:%x:%x:%x TimeStamp: %d Counter: %d State Found: %d",
+                       macAdd[5],macAdd[4],macAdd[3],macAdd[2],macAdd[1],macAdd[0],timestamp,counter,state);
+      Serial.println();
+      Serial.println( "DATA END" );
       digitalWrite(LED_BUILTIN,state);
       /*digitalWrite(LED_BUILTIN,HIGH);
       delay(100);
