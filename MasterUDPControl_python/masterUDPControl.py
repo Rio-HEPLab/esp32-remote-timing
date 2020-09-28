@@ -49,13 +49,14 @@ class UDP_Process:
 					log("INFO","Delay packet sent!")
 				else:
 					try:
-						data=struct.unpack_from('<llB',data)
-						timestamp=data[0]
-						timecounter=data[1]
-						state=data[2]
+						data=struct.unpack_from('<BBBBBllB',data)
+						MACAddress="{:X}:{:X}:{:X}:{:X}:{:X}:{:X}".format(data[0],data[1],data[2],data[3],data[4],data[5])
+						timestamp=data[6]
+						timecounter=data[7]
+						state=data[8]
 						mydata[eventCounter]=(timestamp,timecounter,state)
 						eventCounter+=1
-						log("OK","Timestamp={} - Time Counter={} - State={:01b}".format(data[0],data[1],data[2]))
+						log("OK","MAC: {} - Timestamp={} - Time Counter={} - State={:01b}".format(MACAddress,timestamp,timecounter,state))
 					except:
 						log("FAIL","Wrong data format - Problem found to decode!")
 						sys.exit(1)
@@ -91,12 +92,16 @@ mydata=np.zeros((10000,3))
 
 processUDP=UDP_Process()
 t=threading.Thread(target=processUDP.run)
-t.start()
+
 log("WARNING","UDP thread Started!")
 
 while True:
 	inputCMD = input('\t\tWaiting Commands...\n\n')
-	if inputCMD=="exit":
+	if inputCMD.lower()=="exit":
 		processUDP.stop()
 		t.join()
 		sys.exit(0)
+	if inputCMD.lower()=="start":
+		t.start()
+	if inputCMD.lower()=="help":
+		log("HD","*****   Valid options   *****\nstart\t\tStart the program initializing the main thread to process the UDP protocol\nexit\t\tStop the main thread and close the program")
