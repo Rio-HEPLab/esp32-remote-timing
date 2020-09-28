@@ -54,7 +54,7 @@ class UDP_Process:
 						timestamp=data[6]
 						timecounter=data[7]
 						state=data[8]
-						mydata[eventCounter]=(timestamp,timecounter,state)
+						mydata[eventCounter]=(MACAddress,timestamp,timecounter,state)
 						eventCounter+=1
 						log("OK","MAC: {} - Timestamp={} - Time Counter={} - State={:01b}".format(MACAddress,timestamp,timecounter,state))
 					except:
@@ -88,7 +88,7 @@ sock = socket.socket(socket.AF_INET, # Internet
                      socket.SOCK_DGRAM) # UDP
 sock.bind(("", UDP_PORT))
 #mydata={}
-mydata=np.zeros((10000,3))
+mydata=np.zeros((10000,4))
 
 processUDP=UDP_Process()
 t=threading.Thread(target=processUDP.run)
