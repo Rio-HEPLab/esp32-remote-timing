@@ -4,6 +4,7 @@ import datetime
 import struct
 import numpy as np
 import threading
+import select
 import sys
 
 class bcolors:
@@ -19,14 +20,17 @@ class bcolors:
 class UDP_Process: 
 	def __init__(self):
 		self._running = True
-		
+	def restart(self):
+		self._running = True
 	def stop(self):
 		self._running = False
 		
 	def run(self):
+		log("OK","UDP Control Thread started!")
 		eventCounter=0
 		while self._running:
-			if (sock.recv != None):
+			ready = select.select([sock], [], [], 1)
+			if ready[0]:
 				data, remote = sock.recvfrom(16) # buffer size is 16 bytes
 				if (data == b'CALIB'):
 					log("INFO","Entering on Calibration Mode!")
@@ -60,7 +64,7 @@ class UDP_Process:
 					except:
 						log("FAIL","Wrong data format - Problem found to decode!")
 						sys.exit(1)
-		sys.exit(0)
+		log("OK","UDP Control Thread stoped!")
 def log(mode, text):
 	now = datetime.datetime.now()
 	if (mode=="HD"):
@@ -79,7 +83,7 @@ def millis():
 
 start=millis()
 
-log("HD","------------ UDP Master Python Control ------------")
+log("HD","\n------------ UDP Master Python Control ------------")
 
 UDP_IP = "127.0.0.1"
 UDP_PORT = 3333
@@ -92,16 +96,28 @@ mydata=np.zeros((10000,4))
 
 processUDP=UDP_Process()
 t=threading.Thread(target=processUDP.run)
-
-log("WARNING","UDP thread Started!")
+log("WARNING","UDP thread created! Waiting to start...")
 
 while True:
 	inputCMD = input('\t\tWaiting Commands...\n\n')
 	if inputCMD.lower()=="exit":
-		processUDP.stop()
-		t.join()
+		if t.is_alive():
+			log("WARNING","Stoping the thread and closing program...")
+			processUDP.stop()
+			t.join()
 		sys.exit(0)
-	if inputCMD.lower()=="start":
+	elif inputCMD.lower()=="stop":
+		if t.is_alive():
+			log("WARNING","Stoping the thread...")
+			processUDP.stop()
+			t.join()
+		else:
+			log("WARNING","Thread not running. Nothing to do...")
+	elif inputCMD.lower()=="start":
+		t=threading.Thread(target=processUDP.run)
+		processUDP.restart()
 		t.start()
-	if inputCMD.lower()=="help":
-		log("HD","*****   Valid options   *****\nstart\t\tStart the program initializing the main thread to process the UDP protocol\nexit\t\tStop the main thread and close the program")
+	elif inputCMD.lower()=="help":
+		log("HD","*****   Valid options   *****\nstart\t\tStart the program initializing the main thread to process the UDP protocol\nstop\t\tStop the UDP Control thread\nexit\t\tStop the main thread and close the program")
+	else:
+		log("FAIL","Command not found! Type help to get a list of valid commands...")
